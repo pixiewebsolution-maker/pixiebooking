@@ -24,7 +24,11 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="min-h-dvh antialiased">{children}</body>
+      <body className="min-h-dvh antialiased">
+        <div aria-hidden className="page-glow" />
+        <div aria-hidden className="page-grid" />
+        {children}
+      </body>
     </html>
   );
 }

@@ -1,9 +1,13 @@
 # Pixie Webs — booking site
 
 Mobile-first landing page for Instagram ad traffic. A visitor leaves their name,
-email and phone, picks a free 30 minute slot from our real Google Calendar, and
-walks away with a Meet invite in their inbox. Every lead lands in Supabase with
-its UTM tags.
+email and phone, then picks a free 30 minute slot from our real Google Calendar
+on a month view, and walks away with a Meet invite in their inbox. Every lead
+lands in Supabase with its UTM tags.
+
+The form is two steps: **details**, then **Schedule a meet** (calendar + times).
+Slots are only fetched once step two opens, so an abandoned form costs no
+Google API quota.
 
 **Stack:** Next.js (App Router) · Tailwind CSS v4 · Supabase · Google Calendar API
 
@@ -12,7 +16,7 @@ its UTM tags.
 ## How it works
 
 ```
-/                     landing page + form (name, email, phone, date, time)
+/                     landing page + two-step form
 GET  /api/slots?date= free/busy lookup, returns the bookable slots for that day
 POST /api/book        re-checks, claims the slot, creates the event, saves the lead
 /confirmed?ref=       thank-you page
@@ -166,10 +170,11 @@ src/
     api/slots/route.ts    free/busy → available slots
     api/book/route.ts     validate → re-check → claim → create event → save lead
   components/
-    BookingForm.tsx       form state, UTM capture, submit
-    DatePicker.tsx        horizontal day strip
-    SlotPicker.tsx        time grid
-    Field.tsx             labelled input with inline error
+    BookingForm.tsx       two-step flow, UTM capture, submit
+    Calendar.tsx          month grid, Monday first, available days dotted
+    SlotPicker.tsx        morning/afternoon time grid
+    Field.tsx             labelled input with icon and inline error
+    Icons.tsx             inline SVG icon set
   lib/
     slots.ts              all booking rules and IST maths
     google.ts             OAuth client, free/busy, event creation
