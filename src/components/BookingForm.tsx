@@ -13,15 +13,15 @@ import {
   zoneOptions,
 } from "@/lib/zones";
 import { SLOT_MINUTES } from "@/lib/slots";
+import DateStrip from "./DateStrip";
 import MonthCalendar from "./MonthCalendar";
 import TimePicker from "./TimePicker";
+import TimeZonePicker from "./TimeZonePicker";
 import {
   ArrowRightIcon,
   CalendarIcon,
   CheckIcon,
-  ChevronDownIcon,
   ClockIcon,
-  GlobeIcon,
   LockIcon,
   MailIcon,
   PhoneIcon,
@@ -41,7 +41,7 @@ const TRAP_FIELD = "contact_ref_id";
 
 /** Shown once the booking goes through. */
 const BEFORE_THE_CALL = [
-  "Join 5 minutes early. The Google Meet link is in your email and calendar invite.",
+  "Get ready 5 minutes early. The Google Meet link is in your email and calendar invite.",
   "Use a laptop or desktop if you can, so we can share screens.",
   "Find a quiet spot with a stable internet connection.",
   "Note down the tools, sheets and steps you use today. Screenshots help.",
@@ -276,35 +276,28 @@ export default function BookingForm() {
               </span>
               <span className="picker-hint">{SLOT_MINUTES} min</span>
             </div>
+            {/* Both are rendered; CSS shows the strip on phones, the month elsewhere. */}
             {mounted ? (
-              <MonthCalendar
-                available={available}
-                today={today}
-                value={values.date}
-                onChange={pickDate}
-              />
+              <>
+                <div className="on-wide">
+                  <MonthCalendar
+                    available={available}
+                    today={today}
+                    value={values.date}
+                    onChange={pickDate}
+                  />
+                </div>
+                <div className="on-phone">
+                  <DateStrip available={available} value={values.date} onChange={pickDate} />
+                </div>
+              </>
             ) : (
               <div className="cal is-loading" aria-hidden />
             )}
             {errors.date ? <p className="error">{errors.date}</p> : null}
           </div>
 
-          <label className="zone">
-            <GlobeIcon />
-            <span className="sr-only">Time zone</span>
-            <select value={zone} onChange={(event) => pickZone(event.target.value)} disabled={!mounted}>
-              {mounted ? (
-                zones.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))
-              ) : (
-                <option value={DEFAULT_ZONE}>Time zone</option>
-              )}
-            </select>
-            <ChevronDownIcon />
-          </label>
+          <TimeZonePicker value={zone} options={zones} onChange={pickZone} disabled={!mounted} />
 
           {values.date ? (
             <div className="picker is-times">

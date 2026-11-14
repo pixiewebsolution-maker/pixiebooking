@@ -139,18 +139,36 @@ function cityOf(zone: string): string {
   return zone.split("/").at(-1)?.replace(/_/g, " ") ?? zone;
 }
 
-export type ZoneOption = { value: string; label: string };
+export type ZoneOption = {
+  value: string;
+  /** "Kolkata" */
+  city: string;
+  /** "India Standard Time" */
+  name: string;
+  /** "GMT+5:30" */
+  offset: string;
+  /** Lower-case text the search box matches against. */
+  search: string;
+};
 
 /** Picker options, with the visitor's detected zone guaranteed to be present. */
 export function zoneOptions(include: string[], at: Date = new Date()): ZoneOption[] {
   const zones = Array.from(new Set([...COMMON_ZONES, ...include])).filter(isValidZone);
   return zones
-    .map((zone) => ({ zone, offset: offsetMinutes(zone, at) }))
-    .sort((a, b) => a.offset - b.offset || a.zone.localeCompare(b.zone))
-    .map(({ zone }) => ({
-      value: zone,
-      label: `(${offsetLabel(zone, at)}) ${cityOf(zone)} · ${zonePart(zone, "long", at)}`,
-    }));
+    .map((zone) => ({ zone, minutes: offsetMinutes(zone, at) }))
+    .sort((a, b) => a.minutes - b.minutes || a.zone.localeCompare(b.zone))
+    .map(({ zone }) => {
+      const city = cityOf(zone);
+      const name = zonePart(zone, "long", at);
+      const offset = offsetLabel(zone, at);
+      return {
+        value: zone,
+        city,
+        name,
+        offset,
+        search: `${city} ${name} ${offset} ${zone}`.toLowerCase(),
+      };
+    });
 }
 
 /** Short name for the zone, e.g. "India Standard Time". */
@@ -204,6 +222,19 @@ export function dayLabel(day: string): string {
     day: "numeric",
     month: "long",
   }).format(utcNoon(day));
+}
+
+/** { weekday: "Tue", day: "18", month: "Nov" } for a date chip. */
+export function chipParts(day: string): { weekday: string; day: string; month: string } {
+  const parts = formatter("en-GB", {
+    timeZone: "UTC",
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  }).formatToParts(utcNoon(day));
+  const find = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+  return { weekday: find("weekday"), day: find("day"), month: find("month") };
 }
 
 /** "Nov 2026" for a "2026-11" month string. */

@@ -196,3 +196,12 @@ export function GlobeIcon({ size = 17, className }: IconProps) {
     </svg>
   );
 }
+
+export function SearchIcon({ size = 16, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className}>
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-3.5-3.5" />
+    </svg>
+  );
+}
