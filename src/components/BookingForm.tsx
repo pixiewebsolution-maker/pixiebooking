@@ -1,379 +1,370 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
-import { Calendar } from "@/components/Calendar";
-import { Field } from "@/components/Field";
+import { toISTDayLabel } from "@/lib/slots";
+import DatePicker from "./DatePicker";
+import TimePicker from "./TimePicker";
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
+  CalendarIcon,
+  CheckIcon,
   ClockIcon,
+  LockIcon,
   MailIcon,
   PhoneIcon,
   UserIcon,
   VideoIcon,
-} from "@/components/Icons";
-import { SlotPicker, type Slot } from "@/components/SlotPicker";
-import { selectableDates, toISTLabel } from "@/lib/slots";
-import { UTM_KEYS, bookingSchema, type UtmParams } from "@/lib/validation";
+} from "./Icons";
 
-const UTM_STORAGE_KEY = "pw_utm";
-const TEXT_FIELDS = ["name", "email", "phone"] as const;
-type TextField = (typeof TEXT_FIELDS)[number];
-type Errors = Partial<Record<TextField | "slot" | "form", string>>;
+const TOTAL_STEPS = 2;
 
-export function BookingForm() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
+/**
+ * Honeypot field name. Deliberately meaningless — but the name is not what
+ * saves it. Accepting a Chrome autofill suggestion on any field fills every
+ * other field Chrome thinks it can, whatever they are called, which quietly
+ * flagged real visitors as bots. `readOnly` is the part that actually works:
+ * browsers refuse to autofill a read-only input, while a script setting
+ * `.value` directly — what a bot does — is unaffected.
+ */
+const TRAP_FIELD = "contact_ref_id";
 
-  const [step, setStep] = useState<1 | 2>(1);
-  const [values, setValues] = useState<Record<TextField, string>>({ name: "", email: "", phone: "" });
+type Step = 1 | 2;
+
+type Values = {
+  name: string;
+  phone: string;
+  email: string;
+  date: string;
+  start: string;
+};
+
+type Errors = Partial<Record<keyof Values, string>>;
+
+type Booked = {
+  startLabel: string;
+  meetLink: string | null;
+  emailed: boolean;
+};
+
+const empty: Values = { name: "", phone: "", email: "", date: "", start: "" };
+
+function validateDetails(values: Values): Errors {
+  const errors: Errors = {};
+
+  if (values.name.trim().length < 2) {
+    errors.name = "Please enter your full name.";
+  }
+
+  const digits = values.phone.replace(/\D/g, "");
+  if (digits.length < 8 || digits.length > 15) {
+    errors.phone = "Please enter a valid phone number.";
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(values.email.trim())) {
+    errors.email = "Please enter a valid email address.";
+  }
+
+  return errors;
+}
+
+export default function BookingForm() {
+  const [step, setStep] = useState<Step>(1);
+  const [values, setValues] = useState<Values>(empty);
   const [errors, setErrors] = useState<Errors>({});
-  const [honeypot, setHoneypot] = useState("");
+  const [sending, setSending] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
+  const [booked, setBooked] = useState<Booked | null>(null);
 
-  const [dates, setDates] = useState<string[]>([]);
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
-  const [slots, setSlots] = useState<Slot[]>([]);
-  const [slotsLoading, setSlotsLoading] = useState(false);
-  const [slotsError, setSlotsError] = useState<string | null>(null);
-  const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+  const set = (key: keyof Values) => (value: string) => {
+    setValues((prev) => ({ ...prev, [key]: value }));
+    setErrors((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  };
 
-  const [submitting, setSubmitting] = useState(false);
-  const utm = useRef<UtmParams>({});
-  const cardRef = useRef<HTMLDivElement>(null);
+  // Changing the day invalidates whatever time was picked under the old one.
+  const pickDate = (date: string) => {
+    setValues((prev) => ({ ...prev, date, start: "" }));
+    setErrors((prev) => ({ ...prev, date: undefined, start: undefined }));
+  };
 
-  // Dates depend on the visitor clock, so build them after mount to keep the
-  // server and client markup identical.
-  useEffect(() => {
-    const available = selectableDates();
-    setDates(available);
-    setSelectedDate((current) => current ?? available[0] ?? null);
-  }, []);
-
-  // Instagram sends people here with campaign tags; keep them through a reload.
-  useEffect(() => {
-    const fromUrl: UtmParams = {};
-    for (const key of UTM_KEYS) {
-      const value = searchParams.get(key);
-      if (value) fromUrl[key] = value.slice(0, 200);
-    }
-
-    if (Object.keys(fromUrl).length > 0) {
-      utm.current = fromUrl;
-      try {
-        sessionStorage.setItem(UTM_STORAGE_KEY, JSON.stringify(fromUrl));
-      } catch {
-        // Private mode: campaign tags are nice to have, not essential.
-      }
-      return;
-    }
-
-    try {
-      const stored = sessionStorage.getItem(UTM_STORAGE_KEY);
-      if (stored) utm.current = JSON.parse(stored) as UtmParams;
-    } catch {
-      utm.current = {};
-    }
-  }, [searchParams]);
-
-  const loadSlots = useCallback(async (date: string, signal?: AbortSignal) => {
-    const response = await fetch(`/api/slots?date=${date}`, { signal });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error ?? "Could not load times");
-    return (data.slots ?? []) as Slot[];
-  }, []);
-
-  // Only talk to the calendar once they actually reach the scheduling step.
-  useEffect(() => {
-    if (step !== 2 || !selectedDate) return;
-
-    const controller = new AbortController();
-    setSlotsLoading(true);
-    setSlotsError(null);
-    setSelectedSlot(null);
-
-    loadSlots(selectedDate, controller.signal)
-      .then(setSlots)
-      .catch((error: unknown) => {
-        if (controller.signal.aborted) return;
-        setSlots([]);
-        setSlotsError(error instanceof Error ? error.message : "Could not load times");
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setSlotsLoading(false);
-      });
-
-    return () => controller.abort();
-  }, [step, selectedDate, loadSlots]);
-
-  const validateField = useCallback((field: TextField, value: string) => {
-    const result = bookingSchema.shape[field].safeParse(value);
-    setErrors((current) => ({
-      ...current,
-      [field]: result.success ? undefined : result.error.issues[0]?.message,
-    }));
-  }, []);
-
-  function validateDetails(): boolean {
-    const nextErrors: Errors = {};
-    for (const field of TEXT_FIELDS) {
-      const result = bookingSchema.shape[field].safeParse(values[field]);
-      if (!result.success) nextErrors[field] = result.error.issues[0]?.message;
-    }
-    setErrors(nextErrors);
-    return Object.keys(nextErrors).length === 0;
-  }
-
-  function goToScheduling() {
-    if (!validateDetails()) return;
-    setStep(2);
-    cardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
-
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (submitting) return;
-
-    if (!validateDetails()) {
-      setStep(1);
-      return;
-    }
-
-    if (!selectedSlot) {
-      setErrors({ slot: "Pick a time that works for you" });
-      return;
-    }
-
-    setSubmitting(true);
-    setErrors({});
+  const submit = async (trap: string) => {
+    setSending(true);
+    setFailed(null);
 
     try {
       const response = await fetch("/api/book", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ...values,
-          start: selectedSlot,
-          company_website: honeypot,
-          utm: utm.current,
-          referrer: typeof document !== "undefined" ? document.referrer : undefined,
+          name: values.name.trim(),
+          email: values.email.trim(),
+          phone: values.phone.trim(),
+          start: values.start,
+          [TRAP_FIELD]: trap,
         }),
       });
-
       const data = await response.json();
 
       if (!response.ok) {
-        setErrors({ form: data.error ?? "Something went wrong. Please try again." });
-
-        // Taken while they were deciding: reload that day so the grid is honest.
-        if (response.status === 409 && selectedDate) {
-          setSelectedSlot(null);
-          try {
-            setSlots(await loadSlots(selectedDate));
-          } catch {
-            setSlots([]);
-          }
+        setFailed(data.error ?? "Something went wrong. Please try again.");
+        // The slot went while they were deciding: send them back to pick again.
+        if (response.status === 409) {
+          setValues((prev) => ({ ...prev, start: "" }));
         }
         return;
       }
 
-      router.push(data.ref ? `/confirmed?ref=${encodeURIComponent(data.ref)}` : "/confirmed");
+      setBooked({
+        startLabel: data.startLabel ?? "",
+        meetLink: data.meetLink ?? null,
+        emailed: Boolean(data.emailed),
+      });
     } catch {
-      setErrors({ form: "Network problem. Please check your connection and try again." });
+      setFailed("Could not reach the server. Please check your connection.");
     } finally {
-      setSubmitting(false);
+      setSending(false);
     }
+  };
+
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (step === 1) {
+      const found = validateDetails(values);
+      setErrors(found);
+      if (Object.keys(found).length === 0) setStep(2);
+      return;
+    }
+
+    if (!values.date) {
+      setErrors({ date: "Please pick a date." });
+      return;
+    }
+    if (!values.start) {
+      setErrors({ start: "Please pick a time." });
+      return;
+    }
+    setErrors({});
+
+    // Read straight off the form: an uncontrolled field cannot have leaked
+    // an autofilled value into state earlier in the flow.
+    const trap = new FormData(event.currentTarget).get(TRAP_FIELD);
+    void submit(typeof trap === "string" ? trap : "");
+  };
+
+  if (booked) {
+    return (
+      <section className="card">
+        <div className="done">
+          <div className="done-badge">
+            <CheckIcon />
+          </div>
+          <h2>You&rsquo;re booked, {values.name.trim().split(" ")[0]}.</h2>
+          <p>
+            {booked.startLabel ? <strong>{booked.startLabel} IST</strong> : "Your meeting is set"} —
+            {booked.emailed
+              ? " the details and your Google Meet link are on their way to "
+              : " the calendar invite is on its way to "}
+            {values.email.trim()}.
+          </p>
+          {booked.meetLink ? (
+            <a className="done-link" href={booked.meetLink} target="_blank" rel="noreferrer">
+              <VideoIcon />
+              Google Meet link
+            </a>
+          ) : null}
+        </div>
+      </section>
+    );
   }
 
-  const selectedLabel = selectedSlot ? toISTLabel(new Date(selectedSlot)) : null;
-
   return (
-    <div ref={cardRef} className="card scroll-mt-6 p-5 sm:p-6">
-      <StepHeader step={step} />
+    <section className="card">
+      <div className="card-top">
+        <span className="step-label">
+          Step <b>{String(step).padStart(2, "0")}</b> / {String(TOTAL_STEPS).padStart(2, "0")}
+        </span>
+        <div
+          className="progress"
+          role="progressbar"
+          aria-valuemin={1}
+          aria-valuemax={TOTAL_STEPS}
+          aria-valuenow={step}
+          aria-label={`Step ${step} of ${TOTAL_STEPS}`}
+        >
+          <span style={{ width: `${(step / TOTAL_STEPS) * 100}%` }} />
+        </div>
+      </div>
 
-      <form onSubmit={handleSubmit} noValidate className="mt-5">
+      <form onSubmit={handleSubmit} noValidate>
         {step === 1 ? (
-          <div key="details" className="flex animate-step-in flex-col gap-4">
+          <>
             <Field
               id="name"
               label="Full name"
-              type="text"
-              inputMode="text"
+              icon={<UserIcon />}
+              placeholder="e.g. John Doe"
               autoComplete="name"
-              placeholder="Arjun Nair"
-              icon={<UserIcon className="h-[1.15rem] w-[1.15rem]" />}
               value={values.name}
+              onChange={set("name")}
               error={errors.name}
-              onChange={(value) => setValues((v) => ({ ...v, name: value }))}
-              onBlur={() => validateField("name", values.name)}
+            />
+            <Field
+              id="phone"
+              label="Phone number"
+              icon={<PhoneIcon />}
+              type="tel"
+              inputMode="tel"
+              placeholder="e.g. +91 98765 43210"
+              autoComplete="tel"
+              value={values.phone}
+              onChange={set("phone")}
+              error={errors.phone}
             />
             <Field
               id="email"
               label="Email"
+              icon={<MailIcon />}
               type="email"
               inputMode="email"
+              placeholder="e.g. you@company.com"
               autoComplete="email"
-              placeholder="you@company.com"
-              icon={<MailIcon className="h-[1.15rem] w-[1.15rem]" />}
               value={values.email}
+              onChange={set("email")}
               error={errors.email}
-              onChange={(value) => setValues((v) => ({ ...v, email: value }))}
-              onBlur={() => validateField("email", values.email)}
             />
-            <Field
-              id="phone"
-              label="Phone"
-              type="tel"
-              inputMode="tel"
-              autoComplete="tel"
-              placeholder="+91 98765 43210"
-              icon={<PhoneIcon className="h-[1.15rem] w-[1.15rem]" />}
-              value={values.phone}
-              error={errors.phone}
-              onChange={(value) => setValues((v) => ({ ...v, phone: value }))}
-              onBlur={() => validateField("phone", values.phone)}
-            />
+          </>
+        ) : null}
 
+        {step === 2 ? (
+          <>
+            <div className="picker">
+              <div className="picker-head">
+                <span className="picker-title">
+                  <CalendarIcon size={17} />
+                  Pick a date
+                </span>
+                <span className="picker-hint">30 min · IST</span>
+              </div>
+              <DatePicker value={values.date} onChange={pickDate} />
+              {errors.date ? <p className="error">{errors.date}</p> : null}
+            </div>
+
+            {/* Times only make sense once there is a day to look them up for. */}
+            {values.date ? (
+              <div className="picker is-times">
+                <div className="picker-head">
+                  <span className="picker-title">
+                    <ClockIcon size={17} />
+                    Pick a time
+                  </span>
+                  <span className="picker-hint">{toISTDayLabel(values.date)}</span>
+                </div>
+                <TimePicker date={values.date} value={values.start} onChange={set("start")} />
+                {errors.start ? <p className="error">{errors.start}</p> : null}
+              </div>
+            ) : null}
+          </>
+        ) : null}
+
+        {failed ? <p className="error is-banner">{failed}</p> : null}
+
+        {/* Hidden from people, irresistible to bots. See TRAP_FIELD. */}
+        <input
+          className="trap"
+          type="text"
+          name={TRAP_FIELD}
+          tabIndex={-1}
+          autoComplete="off"
+          aria-hidden
+          readOnly
+          defaultValue=""
+          data-lpignore="true"
+          data-1p-ignore=""
+          data-form-type="other"
+        />
+
+        <div className="actions">
+          {step > 1 ? (
             <button
               type="button"
-              onClick={goToScheduling}
-              className="group mt-1 flex w-full items-center justify-center gap-2 rounded-xl bg-white px-5 py-4 text-base font-semibold text-ink transition hover:bg-white/90 active:scale-[0.99]"
+              className="btn-ghost"
+              onClick={() => setStep((step - 1) as Step)}
+              disabled={sending}
             >
-              Next
-              <ArrowRightIcon className="h-[1.15rem] w-[1.15rem] transition-transform group-hover:translate-x-0.5" />
+              <ArrowLeftIcon />
+              Back
             </button>
-
-            <p className="text-center text-xs text-muted">
-              Takes about 20 seconds. No spam, ever.
-            </p>
-          </div>
-        ) : (
-          <div key="schedule" className="flex animate-step-in flex-col gap-5">
-            <div className="flex items-center justify-between gap-3 rounded-xl border border-line bg-ink/50 px-4 py-3">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium">{values.name}</p>
-                <p className="truncate text-xs text-muted">{values.email}</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setStep(1)}
-                className="shrink-0 text-xs font-medium text-accent-2 underline underline-offset-4 transition hover:text-white"
-              >
-                Edit
-              </button>
-            </div>
-
-            <div className="flex flex-col gap-3">
-              <h3 className="text-lg font-semibold tracking-tight">Schedule a meet</h3>
-              <div className="flex flex-wrap gap-3 text-xs text-muted">
-                <span className="flex items-center gap-1.5">
-                  <ClockIcon className="h-4 w-4" /> 30 minutes
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <VideoIcon className="h-4 w-4" /> Google Meet
-                </span>
-                <span className="flex items-center gap-1.5">India Standard Time</span>
-              </div>
-            </div>
-
-            <Calendar
-              available={dates}
-              selected={selectedDate}
-              onSelect={(date) => {
-                setSelectedDate(date);
-                setErrors((current) => ({ ...current, slot: undefined, form: undefined }));
-              }}
-            />
-
-            <div className="flex flex-col gap-3">
-              <SlotPicker
-                slots={slots}
-                loading={slotsLoading}
-                error={slotsError}
-                selected={selectedSlot}
-                onSelect={(start) => {
-                  setSelectedSlot(start);
-                  setErrors((current) => ({ ...current, slot: undefined }));
-                }}
-              />
-              {errors.slot ? (
-                <p role="alert" className="text-sm text-red-400">
-                  {errors.slot}
-                </p>
-              ) : null}
-            </div>
-
-            {errors.form ? (
-              <p
-                role="alert"
-                className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300"
-              >
-                {errors.form}
-              </p>
-            ) : null}
-
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={() => setStep(1)}
-                aria-label="Back to your details"
-                className="flex w-14 shrink-0 items-center justify-center rounded-xl border border-line text-muted transition hover:border-white/30 hover:text-white"
-              >
-                <ArrowLeftIcon className="h-[1.15rem] w-[1.15rem]" />
-              </button>
-
-              <button
-                type="submit"
-                disabled={submitting}
-                className="flex-1 rounded-xl bg-white px-5 py-4 text-base font-semibold text-ink transition hover:bg-white/90 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {submitting
-                  ? "Confirming…"
-                  : selectedLabel
-                    ? `Confirm ${selectedLabel}`
-                    : "Confirm my call"}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Honeypot. Hidden from people and screen readers; bots fill it in. */}
-        <div aria-hidden className="absolute left-[-9999px] h-0 w-0 overflow-hidden">
-          <label htmlFor="company_website">Company website</label>
-          <input
-            id="company_website"
-            name="company_website"
-            type="text"
-            tabIndex={-1}
-            autoComplete="off"
-            value={honeypot}
-            onChange={(event) => setHoneypot(event.target.value)}
-          />
+          ) : null}
+          <button type="submit" className="btn-primary" disabled={sending}>
+            {step === TOTAL_STEPS ? (sending ? "Booking…" : "Confirm booking") : "Continue"}
+            {sending ? null : <ArrowRightIcon />}
+          </button>
         </div>
       </form>
-    </div>
+
+      <p className="privacy">
+        <LockIcon />
+        Your details stay private. No spam.
+      </p>
+    </section>
   );
 }
 
-function StepHeader({ step }: { step: 1 | 2 }) {
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-baseline justify-between">
-        <p className="text-sm font-semibold tracking-tight">
-          {step === 1 ? "Your details" : "Almost done"}
-        </p>
-        <p className="text-xs text-muted">Step {step} of 2</p>
-      </div>
+type FieldProps = {
+  id: string;
+  label: string;
+  icon: React.ReactNode;
+  placeholder: string;
+  value: string;
+  onChange: (value: string) => void;
+  error?: string;
+  type?: string;
+  inputMode?: "tel" | "email" | "text";
+  autoComplete?: string;
+};
 
-      <div className="flex gap-1.5" aria-hidden>
-        <span className="h-1 flex-1 rounded-full bg-gradient-to-r from-accent to-accent-2" />
-        <span
-          className={`h-1 flex-1 rounded-full transition-all duration-500 ${
-            step === 2 ? "bg-gradient-to-r from-accent to-accent-2" : "bg-line"
-          }`}
+function Field({
+  id,
+  label,
+  icon,
+  placeholder,
+  value,
+  onChange,
+  error,
+  type = "text",
+  inputMode,
+  autoComplete,
+}: FieldProps) {
+  return (
+    <div className="field">
+      <label htmlFor={id}>{label}</label>
+      <div className={`control${error ? " is-invalid" : ""}`}>
+        <span className="control-icon">{icon}</span>
+        <span className="control-divider" />
+        <input
+          id={id}
+          type={type}
+          inputMode={inputMode}
+          autoComplete={autoComplete}
+          placeholder={placeholder}
+          value={value}
+          aria-invalid={Boolean(error)}
+          aria-describedby={error ? `${id}-error` : undefined}
+          onChange={(event) => onChange(event.target.value)}
         />
       </div>
+      {error ? (
+        <p className="error" id={`${id}-error`}>
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

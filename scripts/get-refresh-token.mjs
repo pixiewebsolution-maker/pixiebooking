@@ -18,6 +18,8 @@ const REDIRECT_URI = `http://localhost:${PORT}/oauth2callback`;
 const SCOPES = [
   "https://www.googleapis.com/auth/calendar.events",
   "https://www.googleapis.com/auth/calendar.readonly",
+  // Lets the app send its own confirmation email, with the Meet link in it.
+  "https://www.googleapis.com/auth/gmail.send",
 ];
 
 function loadEnvFile(file) {

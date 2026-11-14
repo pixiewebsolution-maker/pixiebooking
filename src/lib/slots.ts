@@ -39,6 +39,45 @@ const istLabelFormatter = new Intl.DateTimeFormat("en-IN", {
   hour12: true,
 });
 
+const istClockFormatter = new Intl.DateTimeFormat("en-IN", {
+  timeZone: TIME_ZONE,
+  hour: "numeric",
+  minute: "2-digit",
+  hour12: true,
+});
+
+const istChipFormatter = new Intl.DateTimeFormat("en-IN", {
+  timeZone: TIME_ZONE,
+  weekday: "short",
+  day: "numeric",
+  month: "short",
+});
+
+const istDayFormatter = new Intl.DateTimeFormat("en-IN", {
+  timeZone: TIME_ZONE,
+  weekday: "long",
+  day: "numeric",
+  month: "long",
+});
+
+/** "2:30 pm" in IST — the label on a slot button. */
+export function toISTClock(date: Date): string {
+  return istClockFormatter.format(date);
+}
+
+/** { weekday: "Tue", day: "4", month: "Nov" } for a date chip. */
+export function istChipParts(dateString: string): { weekday: string; day: string; month: string } {
+  const parts = istChipFormatter.formatToParts(istInstant(dateString, 12, 0));
+  const find = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+  return { weekday: find("weekday"), day: find("day"), month: find("month") };
+}
+
+/** "Tuesday, 4 November" — the chosen date, shown while picking a time. */
+export function toISTDayLabel(dateString: string): string {
+  return istDayFormatter.format(istInstant(dateString, 12, 0));
+}
+
 /** "2026-11-04" in IST for a given instant (defaults to now). */
 export function toISTDateString(date: Date = new Date()): string {
   return istDateFormatter.format(date);

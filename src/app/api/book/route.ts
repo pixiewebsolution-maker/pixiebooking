@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 
 import { createBookingEvent, getBusyIntervals } from "@/lib/google";
+import { sendConfirmationEmail } from "@/lib/mailer";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
-import { isLegalSlotStart, overlapsBusy, slotEnd } from "@/lib/slots";
-import { supabaseAdmin } from "@/lib/supabase";
-import { UTM_KEYS, bookingSchema, firstError } from "@/lib/validation";
+import { isLegalSlotStart, overlapsBusy, slotEnd, toISTLabel } from "@/lib/slots";
+import { bookingSchema, firstError } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -12,9 +12,7 @@ export const runtime = "nodejs";
 const SLOT_TAKEN = "That time was just booked. Please pick another slot.";
 
 export async function POST(request: Request) {
-  const ip = clientIp(request);
-
-  const burst = rateLimit(`book:${ip}`, 5, 10 * 60_000);
+  const burst = rateLimit(`book:${clientIp(request)}`, 5, 10 * 60_000);
   if (!burst.ok) {
     return NextResponse.json(
       { error: "Too many booking attempts. Please try again later." },
@@ -34,10 +32,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: firstError(parsed.error) }, { status: 400 });
   }
 
-  const { name, email, phone, start: startRaw, company_website, utm, referrer } = parsed.data;
+  const { name, email, phone, start: startRaw, contact_ref_id: trap } = parsed.data;
 
-  // Honeypot tripped: look successful, create nothing.
-  if (company_website) {
+  // Honeypot tripped: look successful, create nothing. Logged with the value,
+  // because a silent discard here is indistinguishable from a broken
+  // integration — and because what filled it is the only useful clue.
+  // HONEYPOT_OFF=1 turns the trap off entirely if it ever misfires again:
+  // losing a real lead costs far more than letting a spam booking through.
+  if (trap && process.env.HONEYPOT_OFF !== "1") {
+    console.warn(
+      `[book] honeypot tripped, discarding submission` +
+        (process.env.NODE_ENV === "production" ? "" : ` — field held: ${JSON.stringify(trap)}`),
+    );
     return NextResponse.json({ ok: true });
   }
 
@@ -50,7 +56,8 @@ export async function POST(request: Request) {
   }
   const end = slotEnd(start);
 
-  // 1. Ask Google again, right now, in case the slot went in the last minute.
+  // Ask Google again, right now, in case the slot went in the last minute.
+  // The calendar is the only source of truth here, so this is the guard.
   try {
     const busy = await getBusyIntervals(start, end);
     if (overlapsBusy(start, busy)) {
@@ -58,53 +65,44 @@ export async function POST(request: Request) {
     }
   } catch (error) {
     console.error("[book] free/busy recheck failed", error);
-    return NextResponse.json({ error: "Could not confirm that time. Please try again." }, { status: 502 });
+    return NextResponse.json(
+      { error: "Could not confirm that time. Please try again." },
+      { status: 502 },
+    );
   }
 
-  const supabase = supabaseAdmin();
+  try {
+    // sendUpdates: "all" is what emails the Google invite to the client —
+    // except when the client is the calendar owner, who never gets one.
+    const event = await createBookingEvent({ name, email, phone, start, end });
 
-  // 2. Claim the slot in Postgres first. The unique index on start_time is what
-  //    actually settles two requests arriving in the same second.
-  const { data: booking, error: insertError } = await supabase
-    .from("bookings")
-    .insert({
+    // Our own copy: carries the Meet link in the body and an .ics, so the
+    // link is in their inbox whatever their calendar app is.
+    const emailed = await sendConfirmationEmail({
       name,
       email,
       phone,
-      start_time: start.toISOString(),
-      end_time: end.toISOString(),
-      referrer: referrer ?? null,
-      ...Object.fromEntries(UTM_KEYS.map((key) => [key, utm?.[key] ?? null])),
-    })
-    .select("id")
-    .single();
+      start,
+      end,
+      meetLink: event.meetLink,
+      eventLink: event.htmlLink,
+      iCalUid: event.iCalUid,
+      organizerEmail: event.organizerEmail,
+    });
 
-  if (insertError || !booking) {
-    if (insertError?.code === "23505") {
-      return NextResponse.json({ error: SLOT_TAKEN }, { status: 409 });
-    }
-    console.error("[book] could not save lead", insertError);
-    return NextResponse.json({ error: "Could not save your booking. Please try again." }, { status: 500 });
-  }
+    console.log(
+      `[book] created ${event.eventId} for ${email}` +
+        ` (meet: ${event.meetLink ? "yes" : "no"}, email: ${emailed ? "sent" : "failed"})`,
+    );
 
-  // 3. Create the meeting. If Google fails, release the claim so the slot reopens.
-  try {
-    const event = await createBookingEvent({ name, email, phone, start, end });
-
-    const { error: updateError } = await supabase
-      .from("bookings")
-      .update({ event_id: event.eventId, meet_link: event.meetLink })
-      .eq("id", booking.id);
-
-    if (updateError) {
-      // The call exists and the client has the invite; just flag it for us.
-      console.error("[book] event created but lead not updated", booking.id, updateError);
-    }
-
-    return NextResponse.json({ ok: true, ref: booking.id });
+    return NextResponse.json({
+      ok: true,
+      startLabel: toISTLabel(start),
+      meetLink: event.meetLink,
+      emailed,
+    });
   } catch (error) {
     console.error("[book] calendar event failed", error);
-    await supabase.from("bookings").delete().eq("id", booking.id);
     return NextResponse.json(
       { error: "We could not confirm that meeting. Please try another time." },
       { status: 502 },

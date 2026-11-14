@@ -1,7 +1,12 @@
-import { google } from "googleapis";
+import { google, type calendar_v3 } from "googleapis";
 import { randomUUID } from "node:crypto";
 
 import { TIME_ZONE, type BusyInterval } from "@/lib/slots";
+
+// Meet rooms are provisioned asynchronously, so events.insert often answers
+// before the link exists. We re-read the event until Google fills it in.
+const MEET_POLL_ATTEMPTS = 6;
+const MEET_POLL_DELAY_MS = 800;
 
 function requiredEnv(name: string): string {
   const value = process.env[name];
@@ -14,17 +19,22 @@ export function calendarId(): string {
 }
 
 /**
- * Our own calendar account, authorised once offline. The refresh token is the
+ * Our own Google account, authorised once offline. The refresh token is the
  * only long lived credential; googleapis mints access tokens from it per call.
+ * Shared with the mailer so calendar and Gmail speak as the same account.
  */
-function calendarClient() {
+export function oauthClient() {
   const auth = new google.auth.OAuth2(
     requiredEnv("GOOGLE_CLIENT_ID"),
     requiredEnv("GOOGLE_CLIENT_SECRET"),
     process.env.GOOGLE_REDIRECT_URI || "http://localhost:3000/oauth2callback",
   );
   auth.setCredentials({ refresh_token: requiredEnv("GOOGLE_REFRESH_TOKEN") });
-  return google.calendar({ version: "v3", auth });
+  return auth;
+}
+
+function calendarClient() {
+  return google.calendar({ version: "v3", auth: oauthClient() });
 }
 
 export async function getBusyIntervals(timeMin: Date, timeMax: Date): Promise<BusyInterval[]> {
@@ -48,7 +58,41 @@ export type CreatedEvent = {
   eventId: string;
   meetLink: string | null;
   htmlLink: string | null;
+  iCalUid: string | null;
+  organizerEmail: string | null;
 };
+
+function meetLinkOf(event: calendar_v3.Schema$Event): string | null {
+  return (
+    event.hangoutLink ||
+    event.conferenceData?.entryPoints?.find((entry) => entry.entryPointType === "video")?.uri ||
+    null
+  );
+}
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function waitForMeetLink(
+  calendar: calendar_v3.Calendar,
+  eventId: string,
+): Promise<string | null> {
+  for (let attempt = 0; attempt < MEET_POLL_ATTEMPTS; attempt += 1) {
+    await wait(MEET_POLL_DELAY_MS);
+
+    const { data } = await calendar.events.get({ calendarId: calendarId(), eventId });
+    const link = meetLinkOf(data);
+    if (link) return link;
+
+    const status = data.conferenceData?.createRequest?.status?.statusCode;
+    if (status === "failure") {
+      console.error("[google] Meet room creation failed for event", eventId);
+      return null;
+    }
+  }
+
+  console.error("[google] Meet link did not appear in time for event", eventId);
+  return null;
+}
 
 export async function createBookingEvent(params: {
   name: string;
@@ -96,11 +140,13 @@ export async function createBookingEvent(params: {
 
   if (!data.id) throw new Error("Google Calendar did not return an event id");
 
-  const meetLink =
-    data.hangoutLink ||
-    data.conferenceData?.entryPoints?.find((e) => e.entryPointType === "video")?.uri ||
-    null;
+  const meetLink = meetLinkOf(data) ?? (await waitForMeetLink(calendar, data.id));
 
-  return { eventId: data.id, meetLink, htmlLink: data.htmlLink ?? null };
+  return {
+    eventId: data.id,
+    meetLink,
+    htmlLink: data.htmlLink ?? null,
+    iCalUid: data.iCalUID ?? null,
+    organizerEmail: data.organizer?.email ?? null,
+  };
 }
-

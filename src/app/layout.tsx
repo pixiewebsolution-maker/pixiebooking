@@ -1,34 +1,29 @@
 import type { Metadata, Viewport } from "next";
-
+import { Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 
+const jakarta = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800"],
+  display: "swap",
+});
+
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"),
-  title: "Book a call — Pixie Webs",
+  title: "Pixie Webs — Let's build a system around your business",
   description:
-    "Book a free 30 minute call with Pixie Webs. We design and build websites that turn visitors into customers.",
-  openGraph: {
-    title: "Book a call — Pixie Webs",
-    description: "Free 30 minute strategy call. Pick a time that suits you.",
-    images: ["/logo-full.png"],
-  },
-  robots: { index: true, follow: true },
+    "Custom ERP & CRM solutions. Tell us where to reach you and we'll take it from there.",
 };
 
 export const viewport: Viewport = {
-  themeColor: "#050505",
-  width: "device-width",
-  initialScale: 1,
+  themeColor: "#fdfdff",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
-      <body className="min-h-dvh antialiased">
-        <div aria-hidden className="page-glow" />
-        <div aria-hidden className="page-grid" />
-        {children}
-      </body>
+    <html lang="en" className={jakarta.className}>
+      <body>{children}</body>
     </html>
   );
 }
