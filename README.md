@@ -140,7 +140,7 @@ All in [`src/lib/slots.ts`](src/lib/slots.ts):
 
 | Constant | Now | Means |
 | --- | --- | --- |
-| `DAY_START_HOUR` / `DAY_END_HOUR` | 10 / 18 | 10:00–18:00 |
+| `DAY_START_HOUR` / `DAY_END_HOUR` | 8 / 21 | 08:00–21:00 |
 | `SLOT_MINUTES` | 30 | meeting length |
 | `MIN_NOTICE_HOURS` | 24 | earliest a visitor can book |
 | `BOOKING_WINDOW_DAYS` | 30 | how far ahead the picker goes |

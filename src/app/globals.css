@@ -1227,9 +1227,32 @@ body {
     border-radius: 19px 19px 0 0;
   }
 
+  /* Three rows that scroll sideways, like the date row above. A short fixed
+     height keeps "Your details" peeking out underneath, so people can see
+     there is more to fill in; the cut-off column on the right says "swipe". */
   .slot-grid {
-    grid-template-columns: repeat(3, 1fr);
-    max-height: 210px;
+    grid-template-columns: none;
+    grid-template-rows: repeat(3, auto);
+    grid-auto-flow: column;
+    grid-auto-columns: 31%;
+    gap: 8px;
+    max-height: none;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+    margin: 0 calc(-1 * var(--card-pad-x));
+    padding: 2px var(--card-pad-x);
+    scroll-padding: 0 var(--card-pad-x);
+  }
+
+  .slot-grid::-webkit-scrollbar {
+    display: none;
+  }
+
+  .slot {
+    height: 42px;
+    scroll-snap-align: start;
   }
 
   .on-wide {

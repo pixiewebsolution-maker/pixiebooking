@@ -178,7 +178,7 @@ export function zoneName(zone: string, at: Date = new Date()): string {
 
 /**
  * Calendar days, in the visitor's zone, that hold at least one bookable slot.
- * A working day is 8 hours long, so its first and last slot cover every local
+ * A working day is shorter than 24 hours, so its first and last slot cover every local
  * day it can touch.
  */
 export function bookableLocalDates(zone: string, now: Date = new Date()): string[] {

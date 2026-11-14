@@ -1,5 +1,5 @@
 /**
- * Slot math for a Mon-Sat, 10:00-18:00 IST calendar with 30 minute meetings.
+ * Slot math for a Mon-Sat, 08:00-21:00 IST calendar with 30 minute meetings.
  *
  * India has no daylight saving, so IST is a fixed +05:30 offset. That lets us
  * build exact instants from a date string without pulling in a tz library.
@@ -8,8 +8,8 @@
 export const TIME_ZONE = "Asia/Kolkata";
 export const IST_OFFSET = "+05:30";
 export const SLOT_MINUTES = 30;
-export const DAY_START_HOUR = 10;
-export const DAY_END_HOUR = 18;
+export const DAY_START_HOUR = 8;
+export const DAY_END_HOUR = 21;
 export const MIN_NOTICE_HOURS = 24;
 export const BOOKING_WINDOW_DAYS = 30;
 

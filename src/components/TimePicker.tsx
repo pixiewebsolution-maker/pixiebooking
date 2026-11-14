@@ -24,6 +24,14 @@ export default function TimePicker({ date, zone, value, onChange }: Props) {
   const [slots, setSlots] = useState<Slot[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Keep the picked time in view in the sideways-scrolling phone grid.
+  useEffect(() => {
+    if (!value) return;
+    document
+      .querySelector<HTMLElement>(".slot.is-selected")
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [value, slots]);
+
   useEffect(() => {
     const controller = new AbortController();
     setSlots(null);
