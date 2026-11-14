@@ -2,21 +2,25 @@
 
 import { useEffect, useState } from "react";
 
-import { toISTClock } from "@/lib/slots";
+import { istDaysFor, localClock, localDate } from "@/lib/zones";
 
-type Slot = { start: string; label: string };
+type Slot = { start: string };
 
 type Props = {
+  /** The day picked on the calendar, in the visitor's zone. */
   date: string;
+  zone: string;
   value: string;
   onChange: (start: string) => void;
 };
 
 /**
- * Times still free on the chosen date. The list comes from the server, which
- * reads the calendar's free/busy — we never trust the client on availability.
+ * Times still free on the chosen day. The server lists free slots per IST
+ * working day from the calendar's free/busy — we never trust the client on
+ * availability. A local day can straddle two IST days, so ask for each and keep
+ * the slots that land on the day the visitor picked.
  */
-export default function TimePicker({ date, value, onChange }: Props) {
+export default function TimePicker({ date, zone, value, onChange }: Props) {
   const [slots, setSlots] = useState<Slot[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,12 +31,24 @@ export default function TimePicker({ date, value, onChange }: Props) {
 
     (async () => {
       try {
-        const response = await fetch(`/api/slots?date=${encodeURIComponent(date)}`, {
-          signal: controller.signal,
-        });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error ?? "Could not load times.");
-        setSlots(data.slots ?? []);
+        const days = istDaysFor(date, zone);
+        const lists = await Promise.all(
+          days.map(async (day) => {
+            const response = await fetch(`/api/slots?date=${encodeURIComponent(day)}`, {
+              signal: controller.signal,
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error ?? "Could not load times.");
+            return (data.slots ?? []) as Slot[];
+          }),
+        );
+
+        setSlots(
+          lists
+            .flat()
+            .filter((slot) => localDate(new Date(slot.start), zone) === date)
+            .sort((a, b) => a.start.localeCompare(b.start)),
+        );
       } catch (cause) {
         if (cause instanceof Error && cause.name === "AbortError") return;
         setError(cause instanceof Error ? cause.message : "Could not load times.");
@@ -40,7 +56,7 @@ export default function TimePicker({ date, value, onChange }: Props) {
     })();
 
     return () => controller.abort();
-  }, [date]);
+  }, [date, zone]);
 
   if (error) {
     return <p className="picker-state is-error">{error}</p>;
@@ -67,7 +83,7 @@ export default function TimePicker({ date, value, onChange }: Props) {
             className={`slot${selected ? " is-selected" : ""}`}
             onClick={() => onChange(slot.start)}
           >
-            {toISTClock(new Date(slot.start))}
+            {localClock(new Date(slot.start), zone)}
           </button>
         );
       })}

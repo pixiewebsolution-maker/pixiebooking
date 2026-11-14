@@ -29,6 +29,8 @@ export type InviteMail = {
   eventLink: string | null;
   iCalUid: string | null;
   organizerEmail: string | null;
+  /** The zone the visitor picked on the form, if any. */
+  timeZone?: string;
 };
 
 /* ---------------------------------------------------------------- formatting */
@@ -40,6 +42,37 @@ const dayFormat = new Intl.DateTimeFormat("en-GB", {
   month: "long",
   year: "numeric",
 });
+
+/**
+ * "Tue, 18 Nov, 9:00 am – 9:30 am GMT" in the visitor's own zone, or null when
+ * they picked IST (already shown) or sent a zone this runtime cannot format.
+ */
+function localTimeLine(invite: InviteMail): string | null {
+  const zone = invite.timeZone;
+  if (!zone || zone === TIME_ZONE) return null;
+
+  try {
+    const day = new Intl.DateTimeFormat("en-GB", {
+      timeZone: zone,
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+    }).format(invite.start);
+    const time = new Intl.DateTimeFormat("en-IN", {
+      timeZone: zone,
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+    const name =
+      new Intl.DateTimeFormat("en-US", { timeZone: zone, timeZoneName: "short" })
+        .formatToParts(invite.start)
+        .find((part) => part.type === "timeZoneName")?.value ?? zone;
+    return `${day}, ${time.format(invite.start)} – ${time.format(invite.end)} ${name}`;
+  } catch {
+    return null;
+  }
+}
 
 /* ---------------------------------------------------------------- ics */
 
@@ -125,6 +158,7 @@ function plainBody(invite: InviteMail): string {
     "",
     `When: ${dayFormat.format(invite.start)}`,
     `Time: ${clock(invite.start)} - ${clock(invite.end)} IST (30 minutes)`,
+    ...(localTimeLine(invite) ? [`Your time: ${localTimeLine(invite)}`] : []),
     ...(invite.meetLink ? [`Google Meet: ${invite.meetLink}`] : []),
     ...(invite.eventLink ? [`Calendar: ${invite.eventLink}`] : []),
     "",
@@ -162,6 +196,11 @@ function htmlBody(invite: InviteMail): string {
         <tr><td style="font-size:13px;color:#9aa8bd;padding-bottom:4px;">When</td></tr>
         <tr><td style="font-size:16px;font-weight:600;">${dayFormat.format(invite.start)}</td></tr>
         <tr><td style="font-size:16px;font-weight:600;padding-top:2px;">${clock(invite.start)} – ${clock(invite.end)} IST</td></tr>
+        ${
+          localTimeLine(invite)
+            ? `<tr><td style="font-size:13px;color:#6b7a90;padding-top:6px;">Your time: ${localTimeLine(invite)}</td></tr>`
+            : ""
+        }
       </table>
     </td></tr>
     ${button}

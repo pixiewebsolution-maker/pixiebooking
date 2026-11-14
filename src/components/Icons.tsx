@@ -186,3 +186,13 @@ export function ChartIcon({ size = 20, className }: IconProps) {
     </svg>
   );
 }
+
+export function GlobeIcon({ size = 17, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className}>
+      <circle cx="12" cy="12" r="9.5" />
+      <path d="M2.5 12h19" />
+      <path d="M12 2.5a14.5 14.5 0 0 1 0 19 14.5 14.5 0 0 1 0-19Z" />
+    </svg>
+  );
+}

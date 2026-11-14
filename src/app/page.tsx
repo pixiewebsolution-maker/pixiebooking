@@ -16,14 +16,16 @@ export default function Home() {
 
       <main className="page">
         <header>
-          <Image
-            className="brand"
-            src="/logo.png"
-            alt="Pixie Webs"
-            width={830}
-            height={223}
-            priority
-          />
+          <a className="brand-link" href="https://www.pixiewebs.com" aria-label="Pixie Webs home">
+            <Image
+              className="brand"
+              src="/logo.png"
+              alt="Pixie Webs"
+              width={830}
+              height={223}
+              priority
+            />
+          </a>
         </header>
 
         <div className="hero">

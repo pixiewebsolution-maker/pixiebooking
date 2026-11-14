@@ -23,6 +23,9 @@ export const bookingSchema = z.object({
     .string({ required_error: "Pick a time that works for you" })
     .trim()
     .refine((value) => !Number.isNaN(Date.parse(value)), "Pick a time that works for you"),
+  // The zone the visitor picked, only used to add their local time to the
+  // email. Bookings are instants, so a bad value must never fail a booking.
+  timeZone: z.string().max(64).optional().catch(undefined),
   // Honeypot. Accepted by the schema so the route can quietly swallow the
   // submission instead of telling a bot which field gave it away. The name is
   // meaningless on purpose: anything a browser can classify gets autofilled.

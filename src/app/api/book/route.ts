@@ -32,7 +32,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: firstError(parsed.error) }, { status: 400 });
   }
 
-  const { name, email, phone, start: startRaw, contact_ref_id: trap } = parsed.data;
+  const { name, email, phone, start: startRaw, timeZone, contact_ref_id: trap } = parsed.data;
 
   // Honeypot tripped: look successful, create nothing. Logged with the value,
   // because a silent discard here is indistinguishable from a broken
@@ -88,6 +88,7 @@ export async function POST(request: Request) {
       eventLink: event.htmlLink,
       iCalUid: event.iCalUid,
       organizerEmail: event.organizerEmail,
+      timeZone,
     });
 
     console.log(
